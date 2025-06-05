@@ -1,0 +1,782 @@
+=== add_flashcard_screen.dart ===
+import 'flashcard_manager.dart';
+import 'package:flutter/material.dart';
+
+class AddFlashcardScreen extends StatelessWidget {
+  final FlashcardManager flashcardManager;
+
+  // 建構子，接收 flashcardManager 參數
+  AddFlashcardScreen({super.key, required this.flashcardManager});
+
+  // 控制標題和定義欄位的文字輸入
+  final TextEditingController titleController = TextEditingController();
+  final TextEditingController definitionController = TextEditingController();
+
+  @override
+  Widget build(BuildContext context) {
+    // Scaffold 是 Flutter 的基礎 UI 框架，提供了標題列、內容區域等
+    return Scaffold(
+      appBar: AppBar(title: Text('新增字卡')), // 顯示標題
+      body: Padding(
+        padding: const EdgeInsets.all(16.0),  // 設定內邊距
+        child: Column(
+          children: [
+            // 用來輸入字卡標題的文字框
+            TextField(
+              controller: titleController,
+              decoration: InputDecoration(labelText: '字卡正面'),
+            ),
+            // 用來輸入字卡定義的文字框
+            TextField(
+              controller: definitionController,
+              decoration: InputDecoration(labelText: '字卡反面'),
+            ),
+            // 儲存字卡的按鈕
+            ElevatedButton(
+              onPressed: () {
+                // 創建一個新的字卡
+                final newCard = Flashcard(
+                  title: titleController.text,
+                  definition: definitionController.text,
+                );
+                // 使用 flashcardManager 新增字卡
+                flashcardManager.addFlashcard(newCard);
+                // 返回上一頁
+                Navigator.pop(context);
+              },
+              child: Text('儲存字卡'),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+
+=== edit_flashcard_screen.dart ===
+import 'package:flutter/material.dart';
+import 'flashcard_manager.dart';
+import 'ollama_service.dart';
+
+class EditFlashcardScreen extends StatefulWidget {
+  final FlashcardManager flashcardManager;
+  final int index;
+
+  const EditFlashcardScreen({
+    super.key,
+    required this.flashcardManager,
+    required this.index,
+  });
+
+  @override
+  _EditFlashcardScreenState createState() => _EditFlashcardScreenState();
+}
+
+class _EditFlashcardScreenState extends State<EditFlashcardScreen> {
+  late TextEditingController wordController;
+  late TextEditingController definitionController;
+  late TextEditingController exampleController;
+
+  @override
+  void initState() {
+    super.initState();
+     Future.microtask(() => _generateExamples()); // 初始化時觸發例句生成
+    final flashcard = widget.flashcardManager.flashcards[widget.index];
+    wordController = TextEditingController(text: flashcard.title);
+    definitionController = TextEditingController(text: flashcard.definition);
+    exampleController = TextEditingController(
+      text: flashcard.example ?? '',
+    ); // 防止 null);
+  }
+
+  @override
+  void dispose() {
+    wordController.dispose();
+    definitionController.dispose();
+    exampleController.dispose();
+    super.dispose();
+  }
+
+  void _generateExamples() async {
+    for (var flashcard in widget.flashcardManager.flashcards) {
+      if (flashcard.example.isEmpty) {
+        String example = await widget.flashcardManager.generateExample(
+          flashcard.title,
+        );
+        if (mounted) {
+          setState(() {
+            flashcard.example = example; // 確保 UI 更新
+          });
+        }
+      }
+    }
+  }
+
+  // Future<void> fetchExampleSentence() async {
+  //   try {
+  //     String word = wordController.text.trim();
+  //     if (word.isEmpty) return;
+  //     String example = await ChatGPTService.generateExampleSentence(word);
+  //     setState(() {
+  //       exampleController.text = example;
+  //     });
+  //   } catch (e) {
+  //     print('Error: $e');
+  //   }
+  // }
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      appBar: AppBar(title: Text('編輯字卡')),
+      body: Padding(
+        padding: const EdgeInsets.all(16.0),
+        child: Column(
+          children: [
+            TextField(
+              controller: wordController,
+              decoration: InputDecoration(labelText: '單字'),
+            ),
+            TextField(
+              controller: definitionController,
+              decoration: InputDecoration(labelText: '定義'),
+            ),
+            TextField(
+              controller: exampleController,
+              decoration: InputDecoration(labelText: '例句'),
+              maxLines: 2,
+            ),
+            SizedBox(height: 16),
+
+            // ChatGPT 調用
+            // ElevatedButton(
+            //   onPressed: fetchExampleSentence,
+            //   child: Text('自動生成例句'),
+            // ),
+            ElevatedButton(
+              onPressed: () async {
+                String word = wordController.text;
+                String example = await generateExample(word); // 呼叫本地 AI 生成例句
+                setState(() {
+                  exampleController.text = example; // 顯示例句
+                });
+              },
+              child: Text('生成例句'),
+            ),
+
+            ElevatedButton(
+              onPressed: () {
+                final updatedCard = Flashcard(
+                  title: wordController.text,
+                  definition: definitionController.text,
+                  example: exampleController.text,
+                );
+                setState(() {
+                  widget.flashcardManager.editFlashcard(
+                    widget.index,
+                    updatedCard,
+                  );
+                });
+                Navigator.pop(context);
+              },
+              child: Text('儲存變更'),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+
+=== flashcard_list_screen.dart ===
+import 'flashcard_manager.dart';
+import 'add_flashcard_screen.dart';
+import 'edit_flashcard_screen.dart';
+import 'flashcard_study_screen.dart';
+import 'package:flutter/material.dart';
+import 'flashcard_quiz_screen.dart'; // 確保有匯入測驗畫面
+
+class FlashcardListScreen extends StatefulWidget {
+  final FlashcardManager flashcardManager;
+
+  const FlashcardListScreen({Key? key, required this.flashcardManager})
+    : super(key: key);
+
+  @override
+  _FlashcardListScreenState createState() => _FlashcardListScreenState();
+}
+
+class _FlashcardListScreenState extends State<FlashcardListScreen> {
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      appBar: AppBar(title: Text('字卡列表')),
+      body: ListView.builder(
+        itemCount: widget.flashcardManager.flashcards.length,
+        itemBuilder: (context, index) {
+          final flashcard = widget.flashcardManager.flashcards[index];
+          return ListTile(
+            title: Text(flashcard.title),
+            subtitle: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(flashcard.definition),
+                Text(
+                  flashcard.example.isNotEmpty
+                      ? '例句: ${flashcard.example}'
+                      : '生成中...',
+                  style: TextStyle(color: Colors.grey),
+                ),
+              ],
+            ),
+
+            trailing: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                IconButton(
+                  icon: Icon(Icons.edit),
+                  onPressed: () {
+                    Navigator.push(
+                      context,
+                      MaterialPageRoute(
+                        builder:
+                            (context) => EditFlashcardScreen(
+                              flashcardManager: widget.flashcardManager,
+                              index: index,
+                            ),
+                      ),
+                    ).then((_) => setState(() {})); // 確保 UI 會刷新
+                  },
+                ),
+                IconButton(
+                  icon: Icon(Icons.delete),
+                  onPressed: () {
+                    setState(() {
+                      // 點擊刪除按鈕時刪除字卡
+                      widget.flashcardManager.deleteFlashcard(index);
+                    });
+                  },
+                ),
+                IconButton(
+                  icon: Icon(Icons.upload_file),
+                  onPressed: () async {
+                    await widget.flashcardManager.importCsv();
+                    setState(() {}); // 重新整理 UI
+                  },
+                ),
+                ElevatedButton(
+                  onPressed: () {
+                    Navigator.push(
+                      context,
+                      MaterialPageRoute(
+                        builder:
+                            (context) => FlashcardStudyScreen(
+                              flashcardManager: widget.flashcardManager,
+                            ),
+                      ),
+                    );
+                  },
+                  child: Text('開始學習'),
+                ),
+                ElevatedButton(
+                  onPressed: () async {
+                    await widget.flashcardManager.importCsv();
+                    setState(() {}); // 更新 UI
+                  },
+                  child: Text('匯入 CSV'),
+                ),
+              ],
+            ),
+          );
+        },
+      ),
+
+      floatingActionButton: Column(
+        mainAxisAlignment: MainAxisAlignment.end,
+        children: [
+          ElevatedButton(
+            onPressed: () {
+              Navigator.push(
+                context,
+                MaterialPageRoute(
+                  builder:
+                      (context) => FlashcardQuizScreen(
+                        flashcardManager: widget.flashcardManager,
+                      ),
+                ),
+              );
+            },
+            child: Text('開始選擇題測驗'),
+          ),
+          SizedBox(height: 10),
+
+          // 新增字卡的浮動按鈕
+          FloatingActionButton(
+            onPressed: () {
+              // 這裡是你原本的新增字卡按鈕
+              // 點擊後跳轉到新增字卡畫面
+              Navigator.push(
+                context,
+                MaterialPageRoute(
+                  builder:
+                      (context) => AddFlashcardScreen(
+                        flashcardManager: widget.flashcardManager,
+                      ),
+                ),
+              ).then((_) => setState(() {})); // 確保 UI 會刷新
+            },
+            child: Icon(Icons.add),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+
+=== flashcard_manager.dart ===
+import 'dart:io';
+import 'package:csv/csv.dart';
+import 'package:flutter/material.dart';
+import 'package:file_picker/file_picker.dart';
+import 'package:hive/hive.dart'; //用來定義 Hive 的資料類別（model），像是 Flashcard。
+import 'ollama_service.dart';
+// import 'package:flutter/src/widgets/framework.dart';
+
+part 'flashcard_manager.g.dart';
+
+// 定義一個字卡類別，包含字卡的標題和定義
+@HiveType(typeId: 0)
+class Flashcard {
+  @HiveField(0)
+  String title;
+
+  @HiveField(1)
+  String definition;
+
+  @HiveField(2)
+  bool isRemembered;
+
+  @HiveField(3)
+  String example;
+
+  Flashcard({
+    required this.title,
+    required this.definition,
+    this.isRemembered = false,
+    this.example = '',
+  });
+
+  Map<String, dynamic> toJson() => {
+    'title': title,
+    'definition': definition,
+    'example': example,
+  };
+
+  factory Flashcard.fromJson(Map<String, dynamic> json) {
+    return Flashcard(
+      title: json['title'],
+      definition: json['definition'],
+      example: json['example'] ?? '',
+    );
+  }
+}
+
+// FlashcardManager 類別，負責管理字卡的增、刪、改功能
+class FlashcardManager extends ChangeNotifier {
+  final Box<Flashcard> flashcardBox = Hive.box('flashcards');
+  List<Flashcard> get flashcards => flashcardBox.values.toList(); // 用來存儲字卡的列表
+
+  void addFlashcard(Flashcard flashcard) {
+    flashcardBox.add(flashcard);
+  }
+
+  void deleteFlashcard(int index) {
+    flashcardBox.deleteAt(index);
+  }
+
+  void editFlashcard(int index, Flashcard updatedFlashcard) {
+    flashcardBox.putAt(index, updatedFlashcard);
+  }
+
+  Future<void> updateFlashcardExample(Flashcard flashcard) async {
+    print('Generating example for: ${flashcard.title}');
+    String example = await generateExample(flashcard.title);
+    print('Generated example: $example');
+    flashcard.example = example;
+    notifyListeners();
+  }
+
+  Future<String> generateExample(String word) async {
+    await Future.delayed(Duration(seconds: 2)); // 模擬 API 請求
+    return "This is an example sentence for $word.";
+  }
+
+  Future<void> importCsv() async {
+    FilePickerResult? result = await FilePicker.platform.pickFiles(
+      type: FileType.custom,
+      allowedExtensions: ['csv'],
+    );
+
+    if (result != null) {
+      File file = File(result.files.single.path!);
+      final input = await file.readAsString();
+      List<List<dynamic>> csvTable = const CsvToListConverter().convert(input);
+
+      for (var row in csvTable) {
+        if (row.length >= 2) {
+          Flashcard newFlashcard = Flashcard(
+            title: row[0].toString(),
+            definition: row[1].toString(),
+          );
+          flashcardBox.add(newFlashcard); // 直接使用 Hive 存入
+        }
+      }
+    }
+  }
+}
+
+
+=== flashcard_manager.g.dart ===
+// GENERATED CODE - DO NOT MODIFY BY HAND
+
+part of 'flashcard_manager.dart';
+
+// **************************************************************************
+// TypeAdapterGenerator
+// **************************************************************************
+
+class FlashcardAdapter extends TypeAdapter<Flashcard> {
+  @override
+  final int typeId = 0;
+
+  @override
+  Flashcard read(BinaryReader reader) {
+    final numOfFields = reader.readByte();
+    final fields = <int, dynamic>{
+      for (int i = 0; i < numOfFields; i++) reader.readByte(): reader.read(),
+    };
+    return Flashcard(
+      title: fields[0] as String,
+      definition: fields[1] as String,
+      isRemembered: fields[2] as bool,
+    );
+  }
+
+  @override
+  void write(BinaryWriter writer, Flashcard obj) {
+    writer
+      ..writeByte(3)
+      ..writeByte(0)
+      ..write(obj.title)
+      ..writeByte(1)
+      ..write(obj.definition)
+      ..writeByte(2)
+      ..write(obj.isRemembered);
+  }
+
+  @override
+  int get hashCode => typeId.hashCode;
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is FlashcardAdapter &&
+          runtimeType == other.runtimeType &&
+          typeId == other.typeId;
+}
+
+
+=== flashcard_quiz_screen.dart ===
+import 'dart:math';
+import 'flashcard_manager.dart';
+import 'package:flutter/material.dart';
+
+class FlashcardQuizScreen extends StatefulWidget {
+  final FlashcardManager flashcardManager;
+
+  FlashcardQuizScreen({required this.flashcardManager});
+
+  @override
+  _FlashcardQuizScreenState createState() => _FlashcardQuizScreenState();
+}
+
+class _FlashcardQuizScreenState extends State<FlashcardQuizScreen> {
+  late Flashcard? correctCard;
+  late List<Flashcard> options = [];
+  int score = 0;
+  int questionIndex = 0;
+  final Random random = Random();
+
+  @override
+  void initState() {
+    super.initState();
+    Future.delayed(Duration.zero, () {
+      generateNewQuestion();
+    });
+  }
+
+  void generateNewQuestion() {
+    if (widget.flashcardManager.flashcards.isEmpty) {
+      setState(() {
+        correctCard = null;
+      });
+      return;
+    }
+
+    correctCard =
+        widget.flashcardManager.flashcards[Random().nextInt(
+          widget.flashcardManager.flashcards.length,
+        )];
+
+    // 生成選項
+    Set<Flashcard> choices = {correctCard!};
+    while (choices.length < 4) {
+      choices.add(
+        widget.flashcardManager.flashcards[Random().nextInt(
+          widget.flashcardManager.flashcards.length,
+        )],
+      );
+    }
+    options = choices.toList();
+    options.shuffle();
+
+    setState(() {});
+  }
+
+  void checkAnswer(Flashcard selectedCard) {
+    if (correctCard == null) return; // 確保 correctCard 已初始化
+
+    if (selectedCard == correctCard) {
+      setState(() {
+        score++;
+      });
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text('正確！當前分數：$score')));
+    } else {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('錯誤！正確答案是：${correctCard?.definition ?? '未知'}')),
+      );
+    }
+
+    questionIndex++;
+    generateNewQuestion();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      appBar: AppBar(title: Text('選擇題測驗')),
+      body:
+          correctCard == null
+              ? Center(child: CircularProgressIndicator()) // 如果還沒初始化，顯示 loading
+              : Column(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  Text(
+                    '請選擇「${correctCard?.title ?? '未知單字'}」的正確定義：',
+                    style: TextStyle(fontSize: 18),
+                    textAlign: TextAlign.center,
+                  ),
+                  SizedBox(height: 20),
+                  ...?options?.map(
+                    (option) => ElevatedButton(
+                      onPressed: () => checkAnswer(option),
+                      child: Text(option.definition),
+                    ),
+                  ),
+                ],
+              ),
+    );
+  }
+}
+
+
+=== flashcard_study_screen.dart ===
+import 'flashcard_manager.dart';
+import 'package:flutter/material.dart';
+import 'package:flutter_tts/flutter_tts.dart';  // 匯入語音播放插件
+
+class FlashcardStudyScreen extends StatefulWidget {
+  final FlashcardManager flashcardManager;
+
+  const FlashcardStudyScreen({super.key, required this.flashcardManager});
+
+  @override
+  _FlashcardStudyScreenState createState() => _FlashcardStudyScreenState();
+}
+
+class _FlashcardStudyScreenState extends State<FlashcardStudyScreen> {
+  int currentIndex = 0;
+  bool showDefinition = false;
+  final FlutterTts flutterTts = FlutterTts(); // 初始化語音引擎
+
+  @override
+  void initState() {
+    super.initState();
+    flutterTts.setLanguage("en-US"); // 設定語言為英文
+  }
+
+  void nextCard() {
+    setState(() {
+      showDefinition = false;
+      if (currentIndex < widget.flashcardManager.flashcards.length - 1) {
+        currentIndex++;
+      } else {
+        currentIndex = 0; // 重新開始
+      }
+      _speak(); // 當切換字卡時，播放語音
+    });
+  }
+
+  // 播放語音
+  void _speak() async {
+    String text = showDefinition
+        ? widget.flashcardManager.flashcards[currentIndex].definition
+        : widget.flashcardManager.flashcards[currentIndex].title;
+
+    await flutterTts.speak(text); // 播放文字語音
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    if (widget.flashcardManager.flashcards.isEmpty) {
+      return Scaffold(
+        appBar: AppBar(title: Text('學習字卡')),
+        body: Center(child: Text('沒有可學習的字卡')),
+      );
+    }
+
+    return Scaffold(
+      appBar: AppBar(title: Text('學習字卡')),
+      body: GestureDetector(
+        onTap: () {
+          setState(() {
+            showDefinition = !showDefinition;
+          });
+          _speak(); // 點擊後播放語音
+        },
+        child: Dismissible(
+          key: ValueKey(currentIndex),
+          direction: DismissDirection.horizontal,
+          onDismissed: (direction) {
+            if (direction == DismissDirection.endToStart) {
+              // 左滑 -> 稍後再複習
+              widget.flashcardManager.flashcards.add(
+                  widget.flashcardManager.flashcards[currentIndex]);
+            }
+            nextCard();
+          },
+          child: Center(
+            child: Card(
+              elevation: 5,
+              child: Padding(
+                padding: const EdgeInsets.all(20.0),
+                child: Text(
+                  showDefinition
+                      ? widget.flashcardManager.flashcards[currentIndex].definition
+                      : widget.flashcardManager.flashcards[currentIndex].title,
+                  style: TextStyle(fontSize: 24),
+                  textAlign: TextAlign.center,
+                ),
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+
+=== main.dart ===
+import './flashcard_manager.dart';
+import './flashcard_list_screen.dart';
+import 'package:flutter/material.dart';
+import 'package:hive_flutter/hive_flutter.dart'; //Hive 在 Flutter 上的擴充版本，用來初始化 Hive，讓它能在 Flutter 環境運作。
+
+// 主要是負責應用程式的啟動，通常不會直接放 UI 控件
+
+void main() async {
+  WidgetsFlutterBinding.ensureInitialized(); // 確保 Flutter 正確初始化
+  await Hive.initFlutter(); // 初始化 Hive
+  Hive.registerAdapter(FlashcardAdapter()); // 註冊 Flashcard 類別
+  await Hive.openBox<Flashcard>('flashcards'); // 開啟存字卡的 box
+
+  final flashcardManager = FlashcardManager(); // 創建 flashcard 管理器
+  runApp(MyApp(flashcardManager: flashcardManager)); // 啟動應用程式
+}
+
+class MyApp extends StatelessWidget {
+  final FlashcardManager flashcardManager;
+  
+  // 建構子，接收 flashcardManager 參數
+  const MyApp({super.key, required this.flashcardManager});
+
+  @override
+  Widget build(BuildContext context) {
+    // 使用 MaterialApp 來建立 UI
+    return MaterialApp(
+      title: '字卡學習',
+      theme: ThemeData(
+        primarySwatch: Colors.blue,
+        visualDensity: VisualDensity.adaptivePlatformDensity,
+      ),
+      home: FlashcardListScreen(flashcardManager: flashcardManager),
+    );
+  }
+}
+
+
+
+
+=== ollama_service.dart ===
+import 'dart:convert';
+import 'package:http/http.dart' as http;
+
+Future<String> generateExample(String word) async {
+  try {
+    final response = await http.post(
+      Uri.parse('http://localhost:11434/api/generate'),
+      headers: {'Content-Type': 'application/json'},
+      body: jsonEncode({
+        'model': 'gemma',
+        'messages': [
+          {
+            'role': 'system',
+            'content': 'You are an AI that provides example sentences.',
+          },
+          {
+            'role': 'user',
+            'content': 'Generate an example sentence using "$word".',
+          },
+        ],
+      }),
+    );
+
+    print('Raw response:\n${response.body}');
+
+    List<String> sentences = [];
+    for (var line in LineSplitter().convert(response.body)) {
+      final Map<String, dynamic> jsonLine = jsonDecode(line);
+      if (jsonLine.containsKey('response')) {
+        sentences.add(jsonLine['response']);
+      }
+    }
+
+    if (sentences.isEmpty) {
+      print('Error: No valid response received');
+      return 'Error generating example';
+    }
+
+    return sentences.join(); // 正確拼接句子
+  } catch (e) {
+    print('JSON Decode Error: $e');
+    return 'Error generating example';
+  }
+}
+
+
